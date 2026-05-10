@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ПУДЖ & СВИНКА</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Rajdhani:wght@400;600&display=swap');
+
+  /* ============================================================
+     ASSET CONFIG — замените пути на свои изображения
+     ============================================================ */
+  :root {
+    --player-img: none;        /* url('assets/player.png') */
+    --target-img: none;        /* url('assets/target.png') */
+    --bg-img: none;            /* url('assets/background.jpg') */
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0a0a0f;
+    font-family: 'Rajdhani', sans-serif;
+    overflow: hidden;
+    color: #fff;
+    user-select: none;
+  }
+
+  canvas {
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+  }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: absolute;
+    top: 16px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; gap: 32px; align-items: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .hud-box {
+    background: rgba(0,0,0,.65);
+    border: 1px solid rgba(255,255,255,.15);
+    padding: 6px 20px;
+    border-radius: 4px;
+    font-family: 'Oswald', sans-serif;
+    font-size: 22px;
+    letter-spacing: 2px;
+  }
+  #mode-label { color: #ff4444; }
+  #score-label { color: #ffcc00; }
+
+  /* ---- OVERLAY (меню / экраны) ---- */
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(5,5,10,.92);
+    z-index: 20;
+    transition: opacity .3s;
+  }
+  #overlay.hidden { display: none; }
+
+  .title {
+    font-family: 'Oswald', sans-serif;
+    font-size: clamp(48px, 8vw, 96px);
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    line-height: 1;
+  }
+  .subtitle {
+    font-size: 16px;
+    color: #888;
+    margin-bottom: 48px;
+    letter-spacing: 3px;
+  }
+
+  .btn-row { display: flex; gap: 24px; }
+
+  .btn {
+    font-family: 'Oswald', sans-serif;
+    font-size: 28px;
+    letter-spacing: 3px;
+    padding: 18px 48px;
+    border: 2px solid currentColor;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background .2s, transform .1s;
+    color: #fff;
+  }
+  .btn:hover { background: rgba(255,255,255,.1); transform: scale(1.04); }
+  .btn.red   { color: #ff4444; border-color: #ff4444; }
+  .btn.red:hover { background: rgba(255,68,68,.15); }
+  .btn.pink  { color: #ff88cc; border-color: #ff88cc; }
+  .btn.pink:hover { background: rgba(255,136,204,.15); }
+  .btn.green { color: #44ff99; border-color: #44ff99; }
+  .btn.green:hover { background: rgba(68,255,153,.15); }
+
+  .result-text {
+    font-family: 'Oswald', sans-serif;
+    font-size: clamp(32px, 5vw, 64px);
+    margin-bottom: 16px;
+    letter-spacing: 4px;
+  }
+  .result-sub {
+    font-size: 18px; color: #aaa;
+    margin-bottom: 40px; letter-spacing: 2px;
+  }
+
+  /* ---- Инструкции ---- */
+  .instructions {
+    margin-top: 32px;
+    font-size: 13px;
+    color: #555;
+    letter-spacing: 2px;
+    text-align: center;
+    line-height: 2;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="hud-box" id="mode-label">ПУДЖ</div>
+  <div class="hud-box" id="score-label">0 / 20</div>
+</div>
+
+<!-- ГЛАВНОЕ МЕНЮ -->
+<div id="overlay">
+  <div id="screen-menu">
+    <div class="title" style="color:#ff4444">ПУДЖ<span style="color:#fff">&</span><span style="color:#ff88cc">СВИНКА</span></div>
+    <div class="subtitle">выбери режим</div>
+    <div class="btn-row">
+      <button class="btn red" onclick="startGame('pudge')">🎣 ПУДЖ</button>
+      <button class="btn pink" onclick="startGame('piggy')">🐷 СВИНКА</button>
+    </div>
+    <div class="instructions">
+      ПУДЖ: ЛКМ — бросить крюк &nbsp;|&nbsp; 20 попаданий = победа<br>
+      СВИНКА: WASD / стрелки — двигаться &nbsp;|&nbsp; не попасть под крюк
+    </div>
+  </div>
+
+  <!-- экран победы / смерти (скрыт изначально) -->
+  <div id="screen-result" style="display:none; text-align:center">
+    <div class="result-text" id="result-title">ПОБЕДА!</div>
+    <div class="result-sub" id="result-sub">Счёт: 20/20</div>
+    <div class="btn-row">
+      <button class="btn green" onclick="showMenu()">В МЕНЮ</button>
+      <button class="btn" id="btn-replay" onclick="replayGame()">ЕЩЁ РАЗ</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  ASSET CONFIG — замените на свои пути / base64 / URL
+// ============================================================
+const ASSETS = {
+  playerImg: (() => { const i = new Image(); i.src='player.jpg'; return i; })(),   // new Image(); playerImg.src = 'assets/player.png'
+  targetImg: (() => { const i = new Image(); i.src='sosiska.png'; return i; })(),   // new Image(); targetImg.src = 'assets/target.png'
+  hookImg:   (() => { const i = new Image(); i.src='hook.jpg'; return i; })(),
+  bgImg:         null,
+};
+
+// ============================================================
+//  CANVAS SETUP
+// ============================================================
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+//  ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+// ============================================================
+let mode       = null;   // 'pudge' | 'piggy'
+let gameState  = 'menu'; // 'menu' | 'playing' | 'result'
+let lastTime   = 0;
+let rafId      = null;
+
+// ============================================================
+//  УТИЛИТЫ
+// ============================================================
+const lerp  = (a,b,t) => a+(b-a)*t;
+const dist  = (a,b)   => Math.hypot(a.x-b.x, a.y-b.y);
+const rand  = (min,max)=> Math.random()*(max-min)+min;
+const randInt=(min,max)=> Math.floor(rand(min,max+1));
+
+function drawCircle(x,y,r,color,alpha=1){
+  ctx.save(); ctx.globalAlpha=alpha;
+  ctx.fillStyle=color; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function drawSprite(img, x, y, w, h, label, color){
+  if(img){
+    ctx.drawImage(img, x-w/2, y-h/2, w, h);
+  } else {
+    // ЗАГЛУШКА
+    ctx.save();
+    ctx.fillStyle = color || '#555';
+    ctx.strokeStyle = 'rgba(255,255,255,.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x,y,w/2,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,.8)';
+    ctx.font=`bold ${Math.floor(w*0.3)}px Rajdhani`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(label||'?', x, y);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+//  ======================== ПУДЖ ===========================
+// ============================================================
+let pudge = {
+  score: 0,
+  targets: [],
+  hook: null,     // { x,y, vx,vy, state:'flying'|'return'|'idle', hitTarget }
+  player: {},
+
+  init(){
+    this.score  = 0;
+    this.targets= [];
+    this.hook   = null;
+    this.player = { x: W/2, y: H*0.82, r: 28 };
+    for(let i=0;i<6;i++) this.spawnTarget();
+    updateHUD();
+  },
+
+  spawnTarget(){
+    const margin = 60;
+    this.targets.push({
+      x:  rand(margin, W-margin),
+      y:  rand(margin, H*0.7-margin),
+      r:  22,
+      vx: rand(-2.5, 2.5) || 1.5,
+      vy: rand(-1.8, 1.8) || 1,
+      color: `hsl(${randInt(0,360)},70%,55%)`,
+      alive: true,
+      flash: 0,
+    });
+  },
+
+  throwHook(tx, ty){
+    if(this.hook && this.hook.state !== 'idle') return;
+    const p  = this.player;
+    const dx = tx - p.x, dy = ty - p.y;
+    const len= Math.hypot(dx,dy) || 1;
+    const spd= 18;
+    this.hook = {
+      x: p.x, y: p.y,
+      vx: dx/len*spd, vy: dy/len*spd,
+      state: 'flying',
+      hitTarget: null,
+    };
+  },
+
+  update(dt){
+    const p   = this.player;
+    const h   = this.hook;
+    const speed = 200; // px/s for targets
+
+    // Двигаем цели
+    this.targets.forEach(t=>{
+      if(!t.alive) return;
+      t.x += t.vx; t.y += t.vy;
+      if(t.x < t.r || t.x > W-t.r) t.vx *= -1;
+      if(t.y < t.r || t.y > H*0.75) t.vy *= -1;
+      if(t.flash > 0) t.flash -= dt;
+    });
+
+    // Крюк
+    if(h){
+      if(h.state === 'flying'){
+        h.x += h.vx; h.y += h.vy;
+        // Проверяем попадание
+        for(let t of this.targets){
+          if(!t.alive) continue;
+          if(dist(h, t) < t.r + 10){
+            h.state = 'return'; h.hitTarget = t;
+            t.flash = 0.3;
+            break;
+          }
+        }
+        // Границы экрана
+        if(h.x<0||h.x>W||h.y<0||h.y>H) h.state='return';
+      }
+      if(h.state === 'return'){
+        const dx = p.x-h.x, dy = p.y-h.y;
+        const len= Math.hypot(dx,dy)||1;
+        const spd= 22;
+        h.x += dx/len*spd; h.y += dy/len*spd;
+        if(h.hitTarget){
+          h.hitTarget.x = h.x; h.hitTarget.y = h.y;
+        }
+        if(dist(h,p) < p.r+10){
+          if(h.hitTarget){
+            h.hitTarget.alive = false;
+            this.score++;
+            updateHUD();
+            this.spawnTarget();
+            if(this.score >= 20) endGame(true);
+          }
+          this.hook = null;
+        }
+      }
+    }
+  },
+
+  draw(){
+    // Фон
+    ctx.fillStyle = '#111118';
+    ctx.fillRect(0,0,W,H);
+    // Сетка (атмосфера)
+    ctx.strokeStyle='rgba(255,255,255,.03)';
+    ctx.lineWidth=1;
+    for(let x=0;x<W;x+=60){ ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke(); }
+    for(let y=0;y<H;y+=60){ ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke(); }
+
+    // Цели
+    this.targets.forEach(t=>{
+      if(!t.alive) return;
+      ctx.save();
+      if(t.flash>0){ ctx.globalAlpha = 0.5+Math.sin(t.flash*40)*0.5; }
+      drawSprite(ASSETS.targetImg, t.x, t.y, t.r*2, t.r*2, '👤', t.color);
+      ctx.restore();
+    });
+
+    // Цепь крюка
+    const h = this.hook;
+    if(h){
+      ctx.save();
+      ctx.strokeStyle='rgba(200,160,60,.8)';
+      ctx.lineWidth=3;
+      ctx.setLineDash([8,5]);
+      ctx.beginPath();
+      ctx.moveTo(this.player.x, this.player.y);
+      ctx.lineTo(h.x, h.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Сам крюк
+      drawCircle(h.x,h.y,9,'#e8aa30');
+      ctx.restore();
+    }
+
+    // Игрок (Пудж)
+    const p = this.player;
+    drawSprite(ASSETS.playerImg, p.x, p.y, p.r*2, p.r*2, 'П', '#c04020');
+
+    // Очки на полотне
+    ctx.fillStyle='rgba(255,200,0,.9)';
+    ctx.font='bold 18px Oswald';
+    ctx.textAlign='left';
+    ctx.fillText(`Попадания: ${this.score}/20`, 20, H-20);
+  },
+};
+
+// ============================================================
+//  ======================= СВИНКА ==========================
+// ============================================================
+let piggy = {
+  player: {},
+  hooks: [],
+  alive: true,
+  arenaR: 0,
+  keys: {},
+  spawnTimer: 0,
+  spawnInterval: 1.8,
+  wave: 0,
+
+  init(){
+    this.alive    = true;
+    this.hooks    = [];
+    this.keys     = {};
+    this.spawnTimer = 0;
+    this.wave     = 0;
+    this.arenaR   = Math.min(W,H)*0.38;
+    this.player   = { x: W/2, y: H/2, r: 18, vx:0, vy:0, speed:180 };
+    updateHUD();
+  },
+
+  spawnHook(){
+    // Откуда летит — случайная точка за границей экрана
+    const angle = rand(0, Math.PI*2);
+    const fromR = Math.max(W,H)*0.8;
+    const fx = W/2 + Math.cos(angle)*fromR;
+    const fy = H/2 + Math.sin(angle)*fromR;
+    // Прицел — позиция игрока + небольшое смещение
+    const spread = this.arenaR * 0.3;
+    const tx = this.player.x + rand(-spread, spread);
+    const ty = this.player.y + rand(-spread, spread);
+    const dx = tx-fx, dy = ty-fy;
+    const len= Math.hypot(dx,dy)||1;
+    const spd= rand(220,340 + this.wave*20);
+    this.hooks.push({
+      x:fx, y:fy,
+      vx: dx/len*spd, vy: dy/len*spd,
+      r: 12,
+      // для отрисовки "нитки" обратно
+      ox:fx, oy:fy,
+      dead: false,
+      life: 0,
+    });
+  },
+
+  update(dt){
+    if(!this.alive) return;
+    const p = this.player;
+
+    // Движение игрока
+    let mx=0, my=0;
+    if(this.keys['ArrowLeft'] ||this.keys['a']||this.keys['A']) mx-=1;
+    if(this.keys['ArrowRight']||this.keys['d']||this.keys['D']) mx+=1;
+    if(this.keys['ArrowUp']   ||this.keys['w']||this.keys['W']) my-=1;
+    if(this.keys['ArrowDown'] ||this.keys['s']||this.keys['S']) my+=1;
+    const mlen=Math.hypot(mx,my)||1;
+    if(mx||my){ p.x+=mx/mlen*p.speed*dt; p.y+=my/mlen*p.speed*dt; }
+
+    // Ограничение ареной
+    const dr = dist(p,{x:W/2,y:H/2});
+    if(dr > this.arenaR - p.r){
+      const ang = Math.atan2(p.y-H/2, p.x-W/2);
+      p.x = W/2 + Math.cos(ang)*(this.arenaR-p.r);
+      p.y = H/2 + Math.sin(ang)*(this.arenaR-p.r);
+    }
+
+    // Спавн крюков
+    this.spawnTimer -= dt;
+    if(this.spawnTimer <= 0){
+      this.spawnHook();
+      this.wave++;
+      this.spawnInterval = Math.max(0.4, 1.8 - this.wave*0.04);
+      this.spawnTimer = this.spawnInterval;
+    }
+
+    // Двигаем крюки
+    this.hooks.forEach(h=>{
+      if(h.dead) return;
+      h.life += dt;
+      h.x += h.vx*dt; h.y += h.vy*dt;
+      // Удаляем если улетели слишком далеко
+      if(Math.hypot(h.x-W/2, h.y-H/2) > Math.max(W,H)){
+        h.dead = true; return;
+      }
+      // Столкновение с игроком
+      if(dist(h,p) < h.r + p.r){
+        this.alive = false;
+        endGame(false);
+      }
+    });
+    this.hooks = this.hooks.filter(h=>!h.dead || h.life<0.5);
+  },
+
+  draw(){
+    // Фон — чёрный с виньеткой
+    ctx.fillStyle = '#04040a';
+    ctx.fillRect(0,0,W,H);
+
+    // Зловещий туман по краям (радиальный градиент)
+    const fog = ctx.createRadialGradient(W/2,H/2,this.arenaR*0.6, W/2,H/2,this.arenaR*1.8);
+    fog.addColorStop(0,'rgba(0,0,0,0)');
+    fog.addColorStop(1,'rgba(0,0,8,0.97)');
+    ctx.fillStyle=fog;
+    ctx.fillRect(0,0,W,H);
+
+    // Арена
+    ctx.save();
+    ctx.strokeStyle='rgba(180,50,50,.5)';
+    ctx.lineWidth=3;
+    ctx.setLineDash([12,8]);
+    ctx.beginPath(); ctx.arc(W/2,H/2,this.arenaR,0,Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+    // Заливка арены (чуть светлее)
+    const arenaGrad = ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,this.arenaR);
+    arenaGrad.addColorStop(0,'rgba(30,10,10,.4)');
+    arenaGrad.addColorStop(1,'rgba(10,5,5,.1)');
+    ctx.fillStyle=arenaGrad;
+    ctx.beginPath(); ctx.arc(W/2,H/2,this.arenaR,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    // Крюки — рисуем нитки и сам крюк
+    this.hooks.forEach(h=>{
+      if(h.dead) return;
+      ctx.save();
+      // нитка
+      ctx.strokeStyle='rgba(200,100,100,.5)';
+      ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(h.ox,h.oy); ctx.lineTo(h.x,h.y); ctx.stroke();
+      // голова крюка
+      const pulse = 0.7+Math.sin(h.life*8)*0.3;
+      ctx.fillStyle=`rgba(255,60,60,${pulse})`;
+      ctx.shadowColor='#ff2200'; ctx.shadowBlur=18;
+      ctx.beginPath(); ctx.arc(h.x,h.y,h.r,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+
+    // Игрок (Свинка)
+    if(this.alive){
+      drawSprite(ASSETS.playerImg, this.player.x, this.player.y, 38,38,'С','#ff88cc');
+    }
+
+    // Счётчик волны
+    ctx.fillStyle='rgba(255,100,100,.7)';
+    ctx.font='bold 16px Oswald';
+    ctx.textAlign='left';
+    ctx.fillText(`Волна: ${this.wave}`, 20, H-20);
+
+    // Перекрёстное прицеливание (всегда видим крюки)
+    ctx.textAlign='center';
+  },
+};
+
+// ============================================================
+//  УПРАВЛЕНИЕ ВВОДОМ
+// ============================================================
+window.addEventListener('keydown', e=>{ if(piggy.keys) piggy.keys[e.key]=true; });
+window.addEventListener('keyup',   e=>{ if(piggy.keys) piggy.keys[e.key]=false; });
+
+canvas.addEventListener('click', e=>{
+  if(gameState!=='playing' || mode!=='pudge') return;
+  pudge.throwHook(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('mousemove', e=>{
+  if(mode==='pudge' && gameState==='playing'){
+    _mouseX = e.clientX; _mouseY = e.clientY;
+  }
+});
+let _mouseX=0, _mouseY=0;
+
+// ============================================================
+//  HUD
+// ============================================================
+const hud       = document.getElementById('hud');
+const modeLabel = document.getElementById('mode-label');
+const scoreLabel= document.getElementById('score-label');
+
+function updateHUD(){
+  if(mode==='pudge'){
+    modeLabel.textContent  = '🎣 ПУДЖ';
+    scoreLabel.textContent = `${pudge.score} / 20`;
+  } else {
+    modeLabel.textContent  = '🐷 СВИНКА';
+    scoreLabel.textContent = `волна ${piggy.wave}`;
+  }
+}
+
+// ============================================================
+//  GAME LOOP
+// ============================================================
+function gameLoop(ts){
+  const dt = Math.min((ts - lastTime)/1000, 0.05);
+  lastTime = ts;
+
+  if(mode==='pudge')  { pudge.update(dt); pudge.draw(); }
+  else if(mode==='piggy'){ piggy.update(dt); piggy.draw(); }
+
+  if(gameState==='playing') rafId = requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+//  ЭКРАНЫ
+// ============================================================
+const overlay     = document.getElementById('overlay');
+const screenMenu  = document.getElementById('screen-menu');
+const screenResult= document.getElementById('screen-result');
+const resultTitle = document.getElementById('result-title');
+const resultSub   = document.getElementById('result-sub');
+const btnReplay   = document.getElementById('btn-replay');
+
+function showMenu(){
+  gameState='menu'; mode=null;
+  cancelAnimationFrame(rafId);
+  hud.classList.add('hidden');
+  overlay.classList.remove('hidden');
+  screenMenu.style.display='';
+  screenResult.style.display='none';
+  // очистим канвас
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,W,H);
+}
+
+function startGame(m){
+  mode=m; gameState='playing';
+  overlay.classList.add('hidden');
+  hud.classList.remove('hidden');
+  if(m==='pudge') pudge.init();
+  else            piggy.init();
+  lastTime=performance.now();
+  rafId=requestAnimationFrame(gameLoop);
+}
+
+function endGame(win){
+  gameState='result';
+  cancelAnimationFrame(rafId);
+  overlay.classList.remove('hidden');
+  screenMenu.style.display='none';
+  screenResult.style.display='';
+  if(win){
+    resultTitle.textContent='🏆 ПОБЕДА!';
+    resultTitle.style.color='#ffcc00';
+    resultSub.textContent=`Крюк попал 20 раз. Пудж доволен.`;
+    btnReplay.textContent='ЕЩЁ РАЗ';
+  } else {
+    resultTitle.textContent='💀 МЁРТВ';
+    resultTitle.style.color='#ff4444';
+    resultSub.textContent=`Волна ${piggy.wave}. Крюк нашёл свинку.`;
+    btnReplay.textContent='СНОВА';
+  }
+  btnReplay.className='btn '+(win?'green':'red');
+}
+
+function replayGame(){ startGame(mode); }
+
+// Стартуем
+showMenu();
+</script>
+</body>
+</html>
